@@ -1,0 +1,71 @@
+import ROOT
+
+# Crear histograma
+h = ROOT.TH1F("h", "Tiempos de decaimiento del muon;#Delta t (#mu s);Conteos", 53, 0, 0)
+h.Sumw2()  # <== Activa el almacenamiento de errores correctamente
+# Leer el archivo línea por línea
+with open("delta_ts_validos.txt", "r") as file:
+    for line in file:
+        try:
+            t = float(line.strip())
+            h.Fill(t)
+        except:
+            continue  # Saltar líneas no válidas
+
+# Definir la función de ajuste: A0 * exp(-x / tau) + C0
+f = ROOT.TF1("f", "[0]*exp(-x/[1]) + [2]", 0, 9)
+f.SetParNames("A_{0}", "tau", "C_{0}")
+f.SetParameters(300, 2.2, 1)
+print(f"Conteo en bin 1: {h.GetBinContent(1)}")
+print(f"Error en bin 1: {h.GetBinError(1)}")
+
+# Ajustar la función al histograma
+h.Fit("f", "R E")
+
+
+# Crear y dibujar en canvas
+c = ROOT.TCanvas("c", "Histograma", 800, 600)
+h.Draw("E")
+stats = h.GetListOfFunctions().FindObject("stats")
+if stats:
+    stats.SetOptStat(1)  # Mostrar solo Entries
+    stats.SetX1NDC(0.7)  # Posición horizontal (izq)
+    stats.SetX2NDC(0.9)  # Posición horizontal (der)
+    stats.SetY1NDC(0.75) # Posición vertical (abajo)
+    stats.SetY2NDC(0.9)  # Posición vertical (arriba)
+
+
+
+# Obtener parámetros ajustados y errores
+tau = f.GetParameter(1)
+e_tau = f.GetParError(1)
+chi2 = f.GetChisquare()
+ndf = f.GetNDF()
+chi2_ndf = chi2 / ndf
+
+# Agregar texto sobre la gráfica
+latex = ROOT.TLatex()
+latex.SetNDC(True)  # Coordenadas normalizadas (de 0 a 1)
+latex.SetTextSize(0.04)
+latex.DrawLatex(0.55, 0.75, f"#tau = {tau:.2f} #pm {e_tau:.2f} #mus")
+latex.DrawLatex(0.55, 0.70, f"#chi^{{2}} / NDF = {chi2:.1f} / {ndf} = {chi2_ndf:.2f}")
+
+
+# Actualizar canvas para que se muestre todo correctamente
+c.Update()
+A0   = f.GetParameter(0)
+e_A0 = f.GetParError(0)
+
+tau  = f.GetParameter(1)
+e_tau= f.GetParError(1)
+
+C0   = f.GetParameter(2)
+e_C0 = f.GetParError(2)
+
+print(f"A0 = {A0:.2f} ± {e_A0:.2f}")
+print(f"tau = {tau:.4f} ± {e_tau:.4f}")
+print(f"C0 = {C0:.2f} ± {e_C0:.2f}")
+
+
+# (Opcional) Guardar como imagen
+c.SaveAs("histograma_muon.png")
