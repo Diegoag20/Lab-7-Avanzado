@@ -1,0 +1,107 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
+from scipy.optimize import curve_fit
+from paa01 import paaFile  # Asegúrate que tu clase esté en este archivo paa01.py
+
+# === PARÁMETROS ===
+archivos_paa = [
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-175704.paa",
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-174704.paa",
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-173703.paa",
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-180704.paa",
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-181704.paa",
+    r"C:\\Users\\Diego\\Downloads\\LA-mml-data_1h-180320-182704.paa"
+]
+
+umbral = -300
+ns_por_punto = 8
+distancia_minima = 100  # ~800 ns
+
+# === PROCESAMIENTO ===
+delta_ts = []
+
+for archivo_path in archivos_paa:
+    print(f"Procesando archivo: {archivo_path}")
+    try:
+        archivo = paaFile(archivo_path)
+        N = archivo.paaGetPulseCount()
+
+        for i in range(N):
+            pulso = archivo.paaGetPulseRP(i)
+            señal_invertida = [-v for v in pulso]
+            picos, _ = find_peaks(señal_invertida, height=-umbral, distance=distancia_minima)
+
+            if len(picos) >= 2:
+                p1, p2 = picos[:2]
+                dt_ns = abs(p2 - p1) * ns_por_punto
+                dt_us = dt_ns / 1000
+                delta_ts.append(dt_us)
+
+    except Exception as e:
+        print(f"Error con archivo {archivo_path}: {e}")
+
+print(f"\nTotal de eventos válidos encontrados: {len(delta_ts)}")
+
+# === HISTOGRAMA Y AJUSTE ===
+bins = np.linspace(0, 30, 41)  # 40 bins entre 0 y 30 µs (41 bordes)
+
+conteos, bordes = np.histogram(delta_ts, bins=bins)
+centros = (bordes[:-1] + bordes[1:]) / 2
+
+def modelo_exponencial(x, A0, B0, C0):
+    return A0 * np.exp(-x / B0) + C0
+
+p0 = [conteos[0], 2.2, 1]  # Parámetros iniciales
+params, cov = curve_fit(modelo_exponencial, centros, conteos, p0=p0)
+A0, B0, C0 = params
+err = np.sqrt(np.diag(cov))
+
+print("\n--- Ajuste Exponencial ---")
+print(f"A0 = {A0:.1f} ± {err[0]:.1f}")
+print(f"B0 (vida media) = {B0:.3f} ± {err[1]:.3f} µs")
+print(f"C0 (fondo) = {C0:.2f} ± {err[2]:.2f}")
+
+# === GRAFICAR ===
+# === CÁLCULO DE CHI^2/ν ===
+# Calcular residuos solo donde hay conteos > 0
+mask = (centros <= 15) & (conteos > 0)
+residuos = conteos[mask] - modelo_exponencial(centros[mask], *params)
+incertidumbres = np.sqrt(conteos[mask])
+chi2 = np.sum((residuos / incertidumbres) ** 2)
+grados_libertad = len(centros[mask]) - len(params)
+chi2_red = chi2 / grados_libertad
+
+
+
+# === GRAFICAR ===
+plt.figure(figsize=(10, 6))
+plt.bar(centros, conteos, width=np.diff(bordes), align='center', label='Datos experimentales', alpha=0.6)
+
+x_fit = np.linspace(min(bordes), max(bordes), 300)
+y_fit = modelo_exponencial(x_fit, *params)
+plt.plot(x_fit, y_fit, 'r-', label=f'Ajuste: τ = {B0:.2f} ± {err[1]:.2f} µs')
+
+# Texto adicional en la gráfica
+info_text = (
+    f"τ = {B0:.2f} ± {err[1]:.2f} µs\n"
+    f"$\chi^2/\\nu$ = {chi2_red:.3f}"
+)
+plt.text(0.70 * max(bordes), 0.85 * max(conteos), info_text, fontsize=12,
+         bbox=dict(facecolor='white', alpha=0.7))
+
+plt.xlabel('Δt (µs)')
+plt.xlim(0, 30)  # o el rango exacto que estás usando
+plt.ylabel('Conteos')
+plt.ylim(0, 1.1 * max(conteos))
+plt.title('Histograma de tiempos de decaimiento del muón')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("histograma_muon.png", dpi=300)
+plt.xticks(np.arange(0, 31, 5))  # ticks cada 5 µs
+plt.show()
+
+
+
+
